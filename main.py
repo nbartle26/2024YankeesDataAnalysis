@@ -1,144 +1,188 @@
 import os
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick   #axis scatter plot formatting
-import plotly.express as px   #makes plot more interactive
+import plotly.graph_objects as go
 
-CSV_FILE = 'yankees_2024_batting.csv'
-URL = 'https://www.baseball-reference.com/teams/NYY/2024-batting.shtml'
+# URLs for regular season and postseason data
+REGULAR_SEASON_URL = 'https://www.baseball-reference.com/teams/NYY/2024-batting.shtml'
+POSTSEASON_URL = 'https://www.baseball-reference.com/teams/NYY/2024.shtml#all_players_standard_batting'
 
-def fetch_and_save_data():
-    #Fetches the Yankees 2024 batting data from Baseball Reference and saves it as a CSV file
-    print("Fetching data from Baseball-Reference...")
+# CSV filenames
+REGULAR_SEASON_CSV = 'yankees_2024_regular_season.csv'
+POSTSEASON_CSV = 'yankees_2024_postseason.csv'
+
+def fetch_and_save_data(url, csv_file, table_index=0):
+    print(f"Fetching data from {url}...")
     try:
-        tables = pd.read_html(URL)
-        for table in tables:
-            if 'PA' in table.columns:
-                df = table
-                break
-        else:
-            print("❌ 'PA' column not found in any table.")
-            return pd.DataFrame()
-
-        df.to_csv(CSV_FILE, index=False)  #saves dataframe as csv
-        print(f"✅ Data saved to {CSV_FILE}")
+        tables = pd.read_html(url)
+        df = tables[table_index]
+        df.to_csv(csv_file, index=False)
+        print(f"✅ Data saved to {csv_file}")
         return df
-    except Exception as e:   #fetch process error handling
+    except Exception as e:
         print(f"❌ Error while fetching data: {e}")
         return pd.DataFrame()
 
-def load_data():
-    """Loads the batting data from CSV if it exists; otherwise fetches from the web."""
-    if os.path.exists(CSV_FILE):
-        print(f"📂 Loading data from {CSV_FILE}")
-        return pd.read_csv(CSV_FILE)
+def load_data(csv_file, url, table_index=0):
+    if os.path.exists(csv_file):
+        print(f"📂 Loading data from {csv_file}")
+        return pd.read_csv(csv_file)
     else:
-        return fetch_and_save_data()  #returns file from web if csv isn't found
+        return fetch_and_save_data(url, csv_file, table_index)
 
-def clean_and_split(df):
-    #Cleans the DataFrame and returns both qualified and unqualified hitters
-    df.columns = df.columns.str.strip()   #removes whitespace from column names
-    print("Available columns:", list(df.columns))
-
-    df = df[df['PA'] != 'PA']  # Remove repeated header rows if present
-
-    #drops nonnumeric, unwanted values in PA column and changes to integer
+def clean_data(df):
+    df.columns = df.columns.str.strip()
+    df = df[df['PA'] != 'PA']
     df = df.copy()
-    df['Player'] = df['Player'].str.replace('*', '', regex=False) #drops player asterisks
+    # Remove '*' and '#' from player names
+    df['Player'] = df['Player'].str.replace('*', '', regex=False).str.replace('#', '', regex=False)
     df['PA'] = pd.to_numeric(df['PA'], errors='coerce')
     df = df.dropna(subset=['PA'])
     df['PA'] = df['PA'].astype(int)
-
-    #makes OBP & SLG columns integers and drops nonnumeric, unwanted values
     for col in ['OBP', 'SLG']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
-    df = df.dropna(subset=['OBP', 'SLG'])    
+    df = df.dropna(subset=['OBP', 'SLG'])
+    return df
 
-    # Filter for qualified and unqualified hitters
-    qualified = df[df['PA'] >= 200].copy()
-    unqualified = df[(df['PA'] < 200) & (df['PA'] > 0)].copy()  # Exclude PA == 0
+def create_figure(regular_df, postseason_df):
+    # Filter qualified hitters for regular season (PA >= 150) + team totals
+    regular_qualified = regular_df[(regular_df['PA'] >= 150) | (regular_df['Player'] == 'Team Totals')]
+    postseason_qualified = postseason_df  # Using all postseason players
 
+    # Separate team totals and individuals for regular season
+    reg_team_totals = regular_qualified[regular_qualified['Player'] == 'Team Totals']
+    reg_individuals = regular_qualified[regular_qualified['Player'] != 'Team Totals']
 
-    return qualified, unqualified
+    # Separate team totals and individuals for postseason
+    post_team_totals = postseason_qualified[postseason_qualified['Player'] == 'Team Totals']
+    post_individuals = postseason_qualified[postseason_qualified['Player'] != 'Team Totals']
 
+    # League averages
+    reg_league_obp = 0.312
+    reg_league_slg = 0.399
+    post_league_obp = 0.302
+    post_league_slg = 0.400
 
-def plot_obp_vs_slg_interactive(df):
-    #Plots OBP vs SLG using Plotly with hoverable player names
-    fig = px.scatter(
-        df,
-        x="OBP",
-        y="SLG",
-        size="PA",
-        hover_name="Player",
-        title="Yankees Qualified Hitters: OBP vs SLG (2024 Regular Season)",
-        size_max=40
-    )
+    fig = go.Figure()
 
-    fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
+    # Regular Season Traces
+    fig.add_trace(go.Scatter(
+        x=reg_individuals['OBP'],
+        y=reg_individuals['SLG'],
+        mode='markers',
+        marker=dict(size=8, color='blue', line=dict(width=1, color='DarkSlateGrey')),
+        text=reg_individuals['Player'],
+        hovertemplate="<b>%{text}</b><br>OBP: %{x:.3f}<br>SLG: %{y:.3f}<extra></extra>",
+        name="Qualified Yankee Hitters (Regular Season)",
+        visible=True
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=reg_team_totals['OBP'],
+        y=reg_team_totals['SLG'],
+        mode='markers',
+        marker=dict(size=10, color='black', symbol='circle'),
+        text=reg_team_totals['Player'],
+        hovertemplate="<b>%{text}</b><br>OBP: %{x:.3f}<br>SLG: %{y:.3f}<extra></extra>",
+        name="Team Totals (Regular Season)",
+        visible=True
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=[reg_league_obp],
+        y=[reg_league_slg],
+        mode='markers+text',
+        marker=dict(size=12, color='black', symbol='x'),
+        text=["League Avg"],
+        textposition="top center",
+        name="League Average (Regular Season)",
+        visible=True
+    ))
+
+    # Postseason Traces (initially hidden)
+    fig.add_trace(go.Scatter(
+        x=post_individuals['OBP'],
+        y=post_individuals['SLG'],
+        mode='markers',
+        marker=dict(size=8, color='blue', line=dict(width=1, color='DarkSlateGrey')),
+        text=post_individuals['Player'],
+        hovertemplate="<b>%{text}</b><br>OBP: %{x:.3f}<br>SLG: %{y:.3f}<extra></extra>",
+        name="Qualified Yankee Hitters (Postseason)",
+        visible=False
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=post_team_totals['OBP'],
+        y=post_team_totals['SLG'],
+        mode='markers',
+        marker=dict(size=10, color='black', symbol='circle'),
+        text=post_team_totals['Player'],
+        hovertemplate="<b>%{text}</b><br>OBP: %{x:.3f}<br>SLG: %{y:.3f}<extra></extra>",
+        name="Team Totals (Postseason)",
+        visible=False
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=[post_league_obp],
+        y=[post_league_slg],
+        mode='markers+text',
+        marker=dict(size=12, color='black', symbol='x'),
+        text=["League Avg"],
+        textposition="top center",
+        name="League Average (Postseason)",
+        visible=False
+    ))
+
+    # Update layout with buttons
     fig.update_layout(
+        title={'text': "Yankees Offensive Analysis: OBP vs SLG (Regular Season)", 'x': 0.5, 'xanchor': 'center'},
         xaxis_title="On-Base Percentage (OBP)",
         yaxis_title="Slugging Percentage (SLG)",
         xaxis_tickformat=".3f",
         yaxis_tickformat=".3f",
-        showlegend=False
+        showlegend=True,
+        updatemenus=[dict(
+            type="buttons",
+            direction="left",
+            x=1,
+            y=0,
+            xanchor="right",
+            yanchor="bottom",
+            buttons=[
+                dict(
+                    label="2024 Postseason Analysis",
+                    method="update",
+                    args=[
+                        {"visible": [False, False, False, True, True, True]},
+                        {"title": "Yankees Offensive Analysis: OBP vs SLG (Postseason)"}
+                    ],
+                ),
+                dict(
+                    label="2024 Season Analysis",
+                    method="update",
+                    args=[
+                        {"visible": [True, True, True, False, False, False]},
+                        {"title": "Yankees Offensive Analysis: OBP vs SLG (Regular Season)"}
+                    ],
+                ),
+            ],
+        )]
     )
 
-    fig.show()
-
-
-
-# ##Building a OBP vs SLG Scatter Plot for Qualified Hitters
-# def plot_obp_vs_slg(df):
-#     plt.figure(figsize=(12, 7))
-#     scatter = plt.scatter(
-#         df['OBP'], 
-#         df['SLG'], 
-#         s=df['PA'] / 5,  # size proportional to Plate Appearances
-#         alpha=0.7, 
-#         edgecolors='black',
-#         ##cmap='viridis'
-#     )
-    
-#     for _, row in df.iterrows():
-#         plt.text(
-#             row['OBP'] + 0.002,  # small offset for readability
-#             row['SLG'] + 0.002,
-#             row['Player'],
-#             fontsize=8,
-#             alpha=0.75
-#         )
-    
-#     plt.xlabel('On-Base Percentage (OBP)')
-#     plt.ylabel('Slugging Percentage (SLG)')
-#     plt.title('Yankees Qualified Hitters: OBP vs SLG (2024 Regular Season)')
-#     plt.grid(True)
-
-#     plt.gca().yaxis.set_major_formatter(mtick.FormatStrFormatter('%.3f'))   #format the y-axis
-
-#     plt.show()
-
+    return fig
 
 def main():
-    data = load_data()
-    if data.empty:
-        print("❌ No data available to process.")
+    regular_df = load_data(REGULAR_SEASON_CSV, REGULAR_SEASON_URL)
+    postseason_df = load_data(POSTSEASON_CSV, POSTSEASON_URL, table_index=1)
+
+    if regular_df.empty or postseason_df.empty:
+        print("❌ One or both datasets are empty, cannot plot.")
         return
 
-    qualified, unqualified = clean_and_split(data)
+    regular_df = clean_data(regular_df)
+    postseason_df = clean_data(postseason_df)
 
-    columns_to_display = ['Player', 'PA', 'AB', 'H', 'HR', 'RBI', 'BB', 'BA', 'OBP', 'SLG']
-
-    print("\n✅ Qualified Hitters (≥200 Plate Appearances):")
-    qualified_cols = [col for col in columns_to_display if col in qualified.columns]
-    print(qualified[qualified_cols])
-
-    print("\n📋 Unqualified Hitters (<200 Plate Appearances, excluding PA = 0):")
-    unqualified_cols = [col for col in columns_to_display if col in unqualified.columns]
-    print(unqualified[unqualified_cols])
-
-    # Plot OBP vs SLG for qualified hitters
-    plot_obp_vs_slg_interactive(qualified)
+    fig = create_figure(regular_df, postseason_df)
+    fig.show()
 
 if __name__ == "__main__":
     main()
-
