@@ -1,0 +1,9 @@
+body {
+    background-image: url("dashSitebackground.jpeg");
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-attachment: fixed;
+    margin: 0; /* remove default margin so image covers fully */
+    height: 100vh; /* full viewport height */
+}
